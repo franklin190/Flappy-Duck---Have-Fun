@@ -9,11 +9,14 @@
 
 import SpriteKit
 
+
 enum Layer: CGFloat {
     case Background
     case Obstacle
+    case EnemyBird
     case Foreground
     case Player
+    case HUD
     case UI
     case Flash
 }
@@ -29,19 +32,22 @@ enum GameState {
 
 struct PhysicsCategory {
     static let None: UInt32 = 0
-    static let Player: UInt32 =     0b1 // 1
-    static let Obstacle: UInt32 =  0b10 // 2
-    static let Ground: UInt32 =   0b100 // 4
+    static let Player: UInt32 =      0b1 // 1
+    static let EnemyBird: UInt32 =   0b10 // 2
+    static let Obstacle: UInt32 =  0b100 // 2
+    static let Ground: UInt32 =   0b1000 // 4
 }
 
 protocol GameSceneDelegate {
     
     func screenshot() -> UIImage
     func shareString(string: String, url: NSURL, image: UIImage)
-    
+    func didShowScore()
+
 }
 
 class GameScene: SKScene, SKPhysicsContactDelegate {
+    
     
     let kGravity: CGFloat = -1500.0
     let kImpulse: CGFloat = 400.0
@@ -52,11 +58,12 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     let kGapMultiplier: CGFloat = 3.5
     let kFirstSpawnDelay: NSTimeInterval = 1.75
     let kEverySpawnDelay: NSTimeInterval = 1.5
-    let kFontName = "AmericanTypewriter-Bold"
+    let kFontName = "HennyPenny-Regular"
     let kMargin: CGFloat = 20.0
     let kAnimDelay = 0.3
     let kAppStoreID = 820464950
     let kNumBirdFrames = 3
+    let kNumBirdHurtFrames = 3
     let kMinDegrees: CGFloat = -90
     let kMaxDegrees: CGFloat = 25
     let kAngularVelocity: CGFloat = 1000.0
@@ -134,6 +141,22 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         
     }
     
+    func setUpLoot(){
+        let loot = SKSpriteNode(imageNamed: "loot")
+        loot.anchorPoint = CGPoint(x: 0.5, y: 1.0)
+        loot.position = CGPoint(x: size.width - loot.size.width/2 - kMargin, y: loot.size.height + kMargin)
+        loot.zPosition = Layer.HUD.rawValue
+        worldNode.addChild(loot)
+    }
+    
+    func setupTopHud(){
+        let hud = SKSpriteNode(imageNamed: "hud")
+        hud.anchorPoint = CGPoint(x: 0.5, y: 1.0)
+        hud.position = CGPoint(x: hud.size.width/2, y: size.height - hud.size.height + kMargin)
+        hud.zPosition = Layer.HUD.rawValue
+        worldNode.addChild(hud)
+    }
+    
     func setupForeground() {
         
         for i in 0..<kNumForegrounds {
@@ -158,7 +181,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         player.physicsBody = SKPhysicsBody(polygonFromPath: Utils.getBirdPath())
         player.physicsBody?.categoryBitMask = PhysicsCategory.Player
         player.physicsBody?.collisionBitMask = 0
-        player.physicsBody?.contactTestBitMask = PhysicsCategory.Obstacle | PhysicsCategory.Ground
+        player.physicsBody?.contactTestBitMask = PhysicsCategory.Obstacle | PhysicsCategory.EnemyBird | PhysicsCategory.Ground
         
         worldNode.addChild(player)
         
@@ -174,7 +197,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     func setupLabel() {
         
         scoreLabel = SKLabelNode(fontNamed: kFontName)
-        scoreLabel.fontColor = SKColor(red: 101.0/255.0, green: 71.0/255.0, blue: 73.0/255.0, alpha: 1.0)
+//        scoreLabel.fontColor = SKColor(red: 167.0/255.0, green: 169.0/255.0, blue: 171.0/255.0, alpha: 1.0)
+        scoreLabel.fontColor = SKColor(red: 255.0/255.0, green: 255.0/255.0, blue: 255.0/255.0, alpha: 1.0)
         scoreLabel.position = CGPoint(x: size.width/2, y: size.height - kMargin)
         scoreLabel.text = "0"
         scoreLabel.verticalAlignmentMode = .Top
@@ -305,6 +329,17 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         player.runAction(SKAction.repeatActionForever(playerAnimation))
     }
     
+    func setupPlayerFallingAnimation(){
+        var textures: Array<SKTexture> = []
+        
+        for i in 0..<kNumBirdHurtFrames {
+            textures.append(SKTexture(imageNamed: "duck_hurt\(i)"))
+        }
+        
+        let playerAnimation = SKAction.animateWithTextures(textures, timePerFrame: 0.5)
+        player.runAction(playerAnimation)
+    }
+    
     func setupMainMenu() {
         
         let logo = SKSpriteNode(imageNamed: "Logo")
@@ -332,25 +367,96 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         rate.position = CGPoint.zeroPoint
         rateButton.addChild(rate)
         
-        // Learn button
-        let learn = SKSpriteNode(imageNamed: "button_learn")
-        learn.position = CGPoint(x: size.width * 0.5, y: learn.size.height/2 + kMargin)
-        learn.zPosition = Layer.UI.rawValue
-        worldNode.addChild(learn)
-        
-        // Bounce button
-        let scaleUp = SKAction.scaleTo(1.02, duration: 0.75)
-        scaleUp.timingMode = .EaseInEaseOut
-        let scaleDown = SKAction.scaleTo(0.98, duration: 0.75)
-        scaleDown.timingMode = .EaseInEaseOut
-        
-        learn.runAction(SKAction.repeatActionForever(SKAction.sequence([
-            scaleUp, scaleDown
-            ])))
-        
     }
     
     // MARK: Gameplay
+    func createEnemyBird() -> SKSpriteNode {
+        var birdType:String
+        
+        if( arc4random_uniform(100) < 50 ){
+            birdType = "black_bird"
+        } else {
+            birdType = "brown_bird"
+        }
+        
+        let sprite = SKSpriteNode(imageNamed: "\(birdType)_0")
+
+        sprite.zPosition = Layer.EnemyBird.rawValue
+        
+        sprite.userData = NSMutableDictionary()
+        
+        let offsetX = sprite.size.width * sprite.anchorPoint.x
+        let offsetY = sprite.size.height * sprite.anchorPoint.y
+        
+        sprite.physicsBody = SKPhysicsBody(polygonFromPath: Utils.getEnemyBirdPath())
+        sprite.physicsBody?.categoryBitMask = PhysicsCategory.EnemyBird
+        sprite.physicsBody?.collisionBitMask = 0
+        sprite.physicsBody?.contactTestBitMask = PhysicsCategory.Player
+       
+        var textures: Array<SKTexture> = []
+        
+        for i in 0..<kNumBirdFrames {
+            textures.append(SKTexture(imageNamed: "\(birdType)_\(i)"))
+        }
+        
+        for i in stride(from: kNumBirdFrames - 1, through: 0, by: -1) {
+            textures.append(SKTexture(imageNamed: "\(birdType)_\(i)"))
+        }
+        
+        let enemyBirdAnimation = SKAction.animateWithTextures(textures, timePerFrame: 0.07)
+        sprite.runAction(SKAction.repeatActionForever(enemyBirdAnimation))
+        
+        return sprite
+    }
+    
+   
+    func spawnEnemyBird() {
+        
+        let enemyBird = createEnemyBird()
+        let startX = size.width + enemyBird.size.width/2
+        
+        let enemyBirdMin = (playableStart) + playableHeight * kBottomObstacleMinFraction
+        let enemyBirdMax = (playableStart) + playableHeight * kBottomObstacleMaxFraction
+        enemyBird.position = CGPointMake(startX, CGFloat.random(min: enemyBirdMin, max: enemyBirdMax))
+        enemyBird.name = "enemyBird"
+        worldNode.addChild(enemyBird)
+        
+        let moveX = size.width + enemyBird.size.width
+        let moveDuration = moveX / ( kGroundSpeed + 200 )
+        let sequence = SKAction.sequence([
+            SKAction.moveByX(-moveX, y: 0, duration: NSTimeInterval(moveDuration)),
+            SKAction.removeFromParent()
+            ])
+        
+        enemyBird.runAction(sequence)
+        
+    }
+    
+    
+    func startSpawningEnemyBird() {
+        
+        let firstDelay = SKAction.waitForDuration(kFirstSpawnDelay)
+        let spawn = SKAction.runBlock(spawnEnemyBird)
+        let everyDelay = SKAction.waitForDuration(kEverySpawnDelay)
+        let spawnSequence = SKAction.sequence([
+            spawn, everyDelay
+            ])
+        let foreverSpawn = SKAction.repeatActionForever(spawnSequence)
+        let overallSequence = SKAction.sequence([firstDelay, foreverSpawn])
+        runAction(overallSequence, withKey: "spawnEnemyBird")
+        
+    }
+    
+    func stopSpawningEnemyBird() {
+        
+        removeActionForKey("spawnEnemyBird")
+        
+        worldNode.enumerateChildNodesWithName("enemyBird", usingBlock: { node, stop in
+            node.removeAllActions()
+        })
+
+    }
+    
     
     func createObstacle() -> SKSpriteNode {
         let sprite = SKSpriteNode(imageNamed: "obsticale")
@@ -370,7 +476,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     
-    
     func spawnObstacle() {
         
         let bottomObstacle = createObstacle()
@@ -383,7 +488,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         worldNode.addChild(bottomObstacle)
         
         let topObstacle = createObstacle()
-        topObstacle.zRotation = CGFloat(180).degreesToRadians()
         topObstacle.position = CGPoint(x: startX, y: bottomObstacle.position.y + bottomObstacle.size.height/2 + topObstacle.size.height/2 + player.size.height * kGapMultiplier)
         topObstacle.name = "TopObstacle"
         worldNode.addChild(topObstacle)
@@ -470,6 +574,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         case .ShowingScore:
             break
         case .GameOver:
+            
             if touchLocation.x < size.width * 0.6 {
                 switchToNewGame(.MainMenu)
             } else {
@@ -607,6 +712,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         setupPlayer()
         setupMainMenu()
         setupPlayerAnimation()
+        setUpLoot()
+        setupTopHud()
     }
     
     func switchToTutorial() {
@@ -617,6 +724,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         setupLabel()
         setupTutorial()
         setupPlayerAnimation()
+        setUpLoot()
+        setupTopHud()
     }
     
     func switchToPlay() {
@@ -635,6 +744,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         
         // Start spawning
         startSpawning()
+        startSpawningEnemyBird()
         
         // Move player
         flapPlayer()
@@ -659,8 +769,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
             SKAction.waitForDuration(0.1),
             fallingAction
             ]))
-        
         player.removeAllActions()
+        setupPlayerFallingAnimation()
         stopSpawning()
         
     }
@@ -669,7 +779,9 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         gameState = .ShowingScore
         player.removeAllActions()
         stopSpawning()
+        stopSpawningEnemyBird()
         setupScorecard()
+        gameSceneDelegate.didShowScore()
     }
     
     func switchToNewGame(gameState: GameState) {
@@ -731,6 +843,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         if other.categoryBitMask == PhysicsCategory.Obstacle {
             hitObstacle = true
         }
+        if other.categoryBitMask == PhysicsCategory.EnemyBird {
+            hitObstacle = true
+        }
     }
+    
     
 }
